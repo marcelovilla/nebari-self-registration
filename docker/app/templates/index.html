@@ -5,6 +5,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- <link href="{{ url_for('static', path='/styles.css') }}" rel="stylesheet" /> -->
     <link href="{{ url_prefix }}/static/styles.css" rel="stylesheet" />
+    <link rel="icon" type="image/x-icon" href="{{ url_prefix }}/static/favicon.ico">
   </head>
   <body>
     <header class="flex content-center">
@@ -17,8 +18,7 @@
         </div>
         <div class="card-body">
           <p>
-            Submit your email address and a valid coupon code to receive a trial
-            account for our AI platform.
+            Submit your email address and a valid coupon code to get access to Nebari.
           </p>
           {% if error_message %}
           <p style="color: red" class="w-full">{{ error_message }}</p>
