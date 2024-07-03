@@ -62,14 +62,12 @@ def create_keycloak_user(email, expiration_days=7):
             verify=True,
         )
     except KeycloakConnectionError:
-        return email, False, None
+        return False, email, False, None
 
     # Check if the user already exists
     user_id = keycloak_admin.get_user_id(email)
     if user_id:
-        raise UserExistsException(
-            "A user with this email address already exists. Contact the administrator if you need to recover your account."
-        )
+        return True, user_id, None, None 
 
     # Calculate account expiration as Unix timestamp
     expiration_date = datetime.utcnow() + timedelta(days=expiration_days)
@@ -92,24 +90,38 @@ def create_keycloak_user(email, expiration_days=7):
     # Set a random temporary password
     temporary_password = generate_random_password()
     keycloak_admin.set_user_password(user_id, temporary_password, temporary=True)
-    return keycloak_admin.get_user(user_id), temporary_password, expiration_date
+    return False, keycloak_admin.get_user(user_id), temporary_password, expiration_date
+
+
+def remove_users_from_group(user):
+    try:
+        keycloak_admin = KeycloakAdmin(
+            server_url=config["keycloak"]["server_url"],
+            realm_name=config["keycloak"]["realm_name"],
+            client_id=config["keycloak"]["client_id"],
+            client_secret_key=config["keycloak"]["client_secret"],
+            user_realm_name=config["keycloak"]["realm_name"],
+            verify=True,
+        )
+    except KeycloakConnectionError:
+        return False
 
 
 # Function to assign a user to a group
 def assign_user_to_groups(user, groups):
-    for group_name in groups:
-        try:
-            keycloak_admin = KeycloakAdmin(
-                server_url=config["keycloak"]["server_url"],
-                realm_name=config["keycloak"]["realm_name"],
-                client_id=config["keycloak"]["client_id"],
-                client_secret_key=config["keycloak"]["client_secret"],
-                user_realm_name=config["keycloak"]["realm_name"],
-                verify=True,
-            )
-        except KeycloakConnectionError:
-            return False
+    try:
+        keycloak_admin = KeycloakAdmin(
+            server_url=config["keycloak"]["server_url"],
+            realm_name=config["keycloak"]["realm_name"],
+            client_id=config["keycloak"]["client_id"],
+            client_secret_key=config["keycloak"]["client_secret"],
+            user_realm_name=config["keycloak"]["realm_name"],
+            verify=True,
+        )
+    except KeycloakConnectionError:
+        return False
 
+    for group_name in groups:
         # Get group
         try:
             group = keycloak_admin.get_group_by_path(group_name)
@@ -160,19 +172,18 @@ async def validate_submission(request: Request, email: str = Form(...), coupon_c
     if coupon_config := config.get("coupons", {}).get(coupon_code):
         if check_email_domain(email, coupon_config.get("approved_domains", [])):
 
-            # Create the user in Keycloak
-            try:
-                user, temporary_password, expiration_date = create_keycloak_user(
-                    email, coupon_config.get("account_expiration_days", None)
-                )
-            except UserExistsException as e:
-                return templates.TemplateResponse("index.html", get_template_context(request, str(e)))
+            # Create the user in Keycloak if it does not exist
+            user_exists, user, temporary_password, expiration_date = create_keycloak_user(
+                email, coupon_config.get("account_expiration_days", None)
+            )
 
             # Assign user to group
             if user:
+                if user_exists:
+                    remove_user_from_groups(user)
                 success = assign_user_to_groups(user, coupon_config.get("registration_groups", []))
 
-                if success:
+                if success and not user_exists:
                     return templates.TemplateResponse(
                         "success.html",
                         {
@@ -185,6 +196,8 @@ async def validate_submission(request: Request, email: str = Form(...), coupon_c
                             **get_theme(),
                         },
                     )
+                elif success and user_exists:
+                    return
                 else:
                     return templates.TemplateResponse(
                         "index.html",
