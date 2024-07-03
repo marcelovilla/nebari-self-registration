@@ -67,7 +67,7 @@ def create_keycloak_user(email, expiration_days=7):
     # Check if the user already exists
     user_id = keycloak_admin.get_user_id(email)
     if user_id:
-        return True, user_id, None, None 
+        return True, keycloak_admin.get_user(user_id), None, None 
 
     # Calculate account expiration as Unix timestamp
     expiration_date = datetime.utcnow() + timedelta(days=expiration_days)
@@ -93,7 +93,7 @@ def create_keycloak_user(email, expiration_days=7):
     return False, keycloak_admin.get_user(user_id), temporary_password, expiration_date
 
 
-def remove_users_from_group(user):
+def remove_user_from_groups(user):
     try:
         keycloak_admin = KeycloakAdmin(
             server_url=config["keycloak"]["server_url"],
@@ -105,6 +105,13 @@ def remove_users_from_group(user):
         )
     except KeycloakConnectionError:
         return False
+    
+    groups = keycloak_admin.get_user_groups(user["id"])
+    for group in groups:
+        if group["name"] not in ("analyst", "users"):
+            keycloak_admin.group_user_remove(user["id"], group["id"])
+
+    return True
 
 
 # Function to assign a user to a group
@@ -197,7 +204,16 @@ async def validate_submission(request: Request, email: str = Form(...), coupon_c
                         },
                     )
                 elif success and user_exists:
-                    return
+                    return templates.TemplateResponse(
+                        "reregistration.html",
+                        {
+                            "url_prefix": url_prefix,
+                            "request": request,
+                            "email": email,
+                            "user_id": user["id"],
+                            **get_theme(),
+                        },
+                    )
                 else:
                     return templates.TemplateResponse(
                         "index.html",
